@@ -77,8 +77,27 @@ for (const filePath of files) {
   let newContent = content;
   let modified = false;
 
-  // Pattern 1: import { internal } from ".../_generated/api" or ".../_generated/api.js"
-  if (hasInternalImport) {
+  // Check for combined import: import { internal, api } or import { api, internal }
+  const hasCombinedImport = hasInternalImport && hasApiImport;
+
+  if (hasCombinedImport) {
+    // Handle combined imports - replace with both require() statements
+    const combinedImportRegex =
+      /^import\s+\{[^}]*(?:internal|api)[^}]*\}\s+from\s+['"]\.\.?\/?.*\/_generated\/api(\.js)?['"];?\s*$/gm;
+
+    if (combinedImportRegex.test(content)) {
+      newContent = newContent.replace(
+        combinedImportRegex,
+        `// Bypass TS2589 by using require() which doesn't trigger type inference
+// eslint-disable-next-line @typescript-eslint/no-explicit-any, @typescript-eslint/no-require-imports
+const internal = require('${importPath}').internal as any;
+// eslint-disable-next-line @typescript-eslint/no-explicit-any, @typescript-eslint/no-require-imports
+const api = require('${importPath}').api as any;`
+      );
+      modified = true;
+    }
+  } else if (hasInternalImport) {
+    // Pattern 1: import { internal } from ".../_generated/api" or ".../_generated/api.js"
     const internalImportRegex =
       /^import\s+\{[^}]*internal[^}]*\}\s+from\s+['"]\.\.?\/?.*\/_generated\/api(\.js)?['"];?\s*$/gm;
 
@@ -91,10 +110,8 @@ const internal = require('${importPath}').internal as any;`
       );
       modified = true;
     }
-  }
-
-  // Pattern 2: import { api } from ".../_generated/api" or ".../_generated/api.js"
-  if (hasApiImport && !modified) {
+  } else if (hasApiImport) {
+    // Pattern 2: import { api } from ".../_generated/api" or ".../_generated/api.js"
     const apiImportRegex =
       /^import\s+\{[^}]*api[^}]*\}\s+from\s+['"]\.\.?\/?.*\/_generated\/api(\.js)?['"];?\s*$/gm;
 
