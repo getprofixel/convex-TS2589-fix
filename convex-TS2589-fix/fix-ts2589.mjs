@@ -77,15 +77,16 @@ for (const filePath of files) {
   let newContent = content;
   let modified = false;
 
-  // Detect true same-line combined import: import { internal, api } or import { api, internal }
+  // Detect true same-line combined import: import { internal, api } (in any order, non-adjacent)
+  // Uses lookaheads to assert both identifiers appear anywhere within the braces
   const sameLineCombinedRegex =
-    /^import\s+\{[^}]*\b(?:internal\s*,\s*api|api\s*,\s*internal)\b[^}]*\}\s+from\s+['"]\.\.?\/?.*\/_generated\/api(\.js)?['"];?\s*$/m;
+    /^import\s+(?:type\s+)?\{(?=[^}]*\binternal\b)(?=[^}]*\bapi\b)[^}]*\}\s+from\s+['"]\.\.?\/?.*\/_generated\/api(\.js)?['"];?.*$/m;
   const hasSameLineCombined = sameLineCombinedRegex.test(content);
 
   if (hasSameLineCombined) {
     // Handle true combined import (both on same line) - replace with both require() statements
     const combinedImportRegex =
-      /^import\s+\{[^}]*\b(?:internal\s*,\s*api|api\s*,\s*internal)\b[^}]*\}\s+from\s+['"]\.\.?\/?.*\/_generated\/api(\.js)?['"];?\s*$/gm;
+      /^import\s+(?:type\s+)?\{(?=[^}]*\binternal\b)(?=[^}]*\bapi\b)[^}]*\}\s+from\s+['"]\.\.?\/?.*\/_generated\/api(\.js)?['"];?.*$/gm;
 
     newContent = newContent.replace(
       combinedImportRegex,
@@ -98,51 +99,66 @@ const api = require('${importPath}').api as any;`
     modified = true;
   } else if (hasInternalImport && hasApiImport) {
     // Handle separate-line imports - replace each independently
+    // Supports optional "type" token and trailing comments/whitespace
     const internalImportRegex =
-      /^import\s+\{[^}]*internal[^}]*\}\s+from\s+['"]\.\.?\/?.*\/_generated\/api(\.js)?['"];?\s*$/gm;
+      /^import\s+(?:type\s+)?\{[^}]*\binternal\b[^}]*\}\s+from\s+['"]\.\.?\/?.*\/_generated\/api(\.js)?['"];?.*$/gm;
     const apiImportRegex =
-      /^import\s+\{[^}]*api[^}]*\}\s+from\s+['"]\.\.?\/?.*\/_generated\/api(\.js)?['"];?\s*$/gm;
+      /^import\s+(?:type\s+)?\{[^}]*\bapi\b[^}]*\}\s+from\s+['"]\.\.?\/?.*\/_generated\/api(\.js)?['"];?.*$/gm;
 
+    const beforeInternal = newContent;
     newContent = newContent.replace(
       internalImportRegex,
       `// Bypass TS2589 by using require() which doesn't trigger type inference
 // eslint-disable-next-line @typescript-eslint/no-explicit-any, @typescript-eslint/no-require-imports
 const internal = require('${importPath}').internal as any;`
     );
+    const internalReplaced = beforeInternal !== newContent;
+
+    const beforeApi = newContent;
     newContent = newContent.replace(
       apiImportRegex,
       `// Bypass TS2589 by using require() which doesn't trigger type inference
 // eslint-disable-next-line @typescript-eslint/no-explicit-any, @typescript-eslint/no-require-imports
 const api = require('${importPath}').api as any;`
     );
-    modified = true;
+    const apiReplaced = beforeApi !== newContent;
+
+    modified = internalReplaced || apiReplaced;
   } else if (hasInternalImport) {
     // Pattern 1: import { internal } from ".../_generated/api" or ".../_generated/api.js"
+    // Supports optional "type" token and trailing comments/whitespace
     const internalImportRegex =
-      /^import\s+\{[^}]*internal[^}]*\}\s+from\s+['"]\.\.?\/?.*\/_generated\/api(\.js)?['"];?\s*$/gm;
+      /^import\s+(?:type\s+)?\{[^}]*\binternal\b[^}]*\}\s+from\s+['"]\.\.?\/?.*\/_generated\/api(\.js)?['"];?.*$/gm;
 
     if (internalImportRegex.test(content)) {
+      // Reset lastIndex after test() since we're using the same regex for replace
+      internalImportRegex.lastIndex = 0;
+      const before = newContent;
       newContent = newContent.replace(
         internalImportRegex,
         `// Bypass TS2589 by using require() which doesn't trigger type inference
 // eslint-disable-next-line @typescript-eslint/no-explicit-any, @typescript-eslint/no-require-imports
 const internal = require('${importPath}').internal as any;`
       );
-      modified = true;
+      modified = before !== newContent;
     }
   } else if (hasApiImport) {
     // Pattern 2: import { api } from ".../_generated/api" or ".../_generated/api.js"
+    // Supports optional "type" token and trailing comments/whitespace
     const apiImportRegex =
-      /^import\s+\{[^}]*api[^}]*\}\s+from\s+['"]\.\.?\/?.*\/_generated\/api(\.js)?['"];?\s*$/gm;
+      /^import\s+(?:type\s+)?\{[^}]*\bapi\b[^}]*\}\s+from\s+['"]\.\.?\/?.*\/_generated\/api(\.js)?['"];?.*$/gm;
 
     if (apiImportRegex.test(content)) {
+      // Reset lastIndex after test() since we're using the same regex for replace
+      apiImportRegex.lastIndex = 0;
+      const before = newContent;
       newContent = newContent.replace(
         apiImportRegex,
         `// Bypass TS2589 by using require() which doesn't trigger type inference
 // eslint-disable-next-line @typescript-eslint/no-explicit-any, @typescript-eslint/no-require-imports
 const api = require('${importPath}').api as any;`
       );
-      modified = true;
+      modified = before !== newContent;
     }
   }
 
